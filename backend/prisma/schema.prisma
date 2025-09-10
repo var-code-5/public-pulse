@@ -11,23 +11,148 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Define your models here
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  posts     Post[]
+enum Role {
+  CITIZEN
+  GOVERNMENT
+  ADMIN
 }
 
-model Post {
-  id        Int      @id @default(autoincrement())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  author    User     @relation(fields: [authorId], references: [id])
-  authorId  Int
+enum IssueStatus {
+  PENDING
+  ONGOING
+  PAUSED
+  CLOSED
+}
+
+enum VoteType {
+  UPVOTE
+  DOWNVOTE
+}
+
+model User {
+  id          String     @id @default(cuid())
+  name        String?
+  email       String?    @unique
+  firebaseUid String     @unique
+  role        Role       @default(CITIZEN)
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  issues      Issue[]    @relation("UserIssues")
+  comments    Comment[]
+  votes       Vote[]
+  statusChanges IssueStatusHistory[]
+  notifications Notification[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+
+  users     User[]
+  issues    Issue[]
+}
+
+model Issue {
+  id          String     @id @default(cuid())
+  title       String
+  description String
+  latitude    Float
+  longitude   Float
+  severity    Int        @default(0)
+  status      IssueStatus @default(PENDING)
+
+  departmentId String?   // optional assignment to a department
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  authorId    String
+  author      User       @relation("UserIssues", fields: [authorId], references: [id])
+
+  comments    Comment[]
+  images      Image[]
+  votes       Vote[]
+  statusLogs  IssueStatusHistory[]
+  notifications Notification[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Comment {
+  id          String    @id @default(cuid())
+  content     String
+
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+
+  issueId     String?
+  issue       Issue?    @relation(fields: [issueId], references: [id])
+
+  parentId    String?
+  parent      Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[] @relation("CommentReplies")
+
+  votes       Vote[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Vote {
+  id        String    @id @default(cuid())
+  type      VoteType
+
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+
+  issueId   String?
+  issue     Issue?    @relation(fields: [issueId], references: [id])
+
+  commentId String?
+  comment   Comment?  @relation(fields: [commentId], references: [id])
+
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, issueId])
+  @@unique([userId, commentId])
+}
+
+model Image {
+  id       String  @id @default(cuid())
+  url      String
+
+  issueId  String
+  issue    Issue   @relation(fields: [issueId], references: [id])
+
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+}
+
+model IssueStatusHistory {
+  id        String      @id @default(cuid())
+  status    IssueStatus
+  changedAt DateTime    @default(now())
+
+  issueId   String
+  issue     Issue       @relation(fields: [issueId], references: [id])
+
+  changedById String
+  changedBy   User       @relation(fields: [changedById], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  message   String
+  read      Boolean  @default(false)
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  issueId   String?
+  issue     Issue?   @relation(fields: [issueId], references: [id])
+
+  createdAt DateTime @default(now())
 }
