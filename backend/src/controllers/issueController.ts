@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { IssueStatus } from '../generated/prisma';
+import { uploadMultipleFiles, deleteMultipleFiles } from '../utils/s3';
 
 /**
  * Create a new issue
@@ -14,7 +15,7 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized: Authentication required' });
     }
 
-    const { title, description, latitude, longitude, severity, images } = req.body;
+    const { title, description, latitude, longitude, severity } = req.body;
     const authorId = req.user.id;
 
     // Validate required fields
@@ -22,7 +23,18 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'Title, description, latitude, and longitude are required' });
     }
 
-    // Create a new issue with Prisma transaction to handle images if provided
+    // Upload images to S3 if they exist
+    let imageUrls: string[] = [];
+    if (req.files && Array.isArray(req.files)) {
+      try {
+        imageUrls = await uploadMultipleFiles(req.files);
+      } catch (uploadError) {
+        console.error('Error uploading images to S3:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload images' });
+      }
+    }
+
+    // Create a new issue with Prisma transaction to handle images
     const issue = await prisma.$transaction(async (prisma) => {
       // Create the issue
       const newIssue = await prisma.issue.create({
@@ -36,9 +48,9 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
         },
       });
 
-      // If images are provided, create them
-      if (images && Array.isArray(images)) {
-        for (const imageUrl of images) {
+      // Create image records with S3 URLs
+      if (imageUrls.length > 0) {
+        for (const imageUrl of imageUrls) {
           await prisma.image.create({
             data: {
               url: imageUrl,
@@ -322,7 +334,8 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const { id } = req.params;
-    const { title, description, latitude, longitude, severity, images } = req.body;
+    const { title, description, latitude, longitude, severity } = req.body;
+    const shouldReplaceImages = req.body.replaceImages === 'true' || req.body.replaceImages === true;
 
     // Find the issue to check ownership
     const issue = await prisma.issue.findUnique({
@@ -344,7 +357,18 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: 'Forbidden: You do not have permission to update this issue' });
     }
 
-    // Update the issue with Prisma transaction to handle images if provided
+    // Upload new images to S3 if they exist
+    let newImageUrls: string[] = [];
+    if (req.files && Array.isArray(req.files)) {
+      try {
+        newImageUrls = await uploadMultipleFiles(req.files);
+      } catch (uploadError) {
+        console.error('Error uploading images to S3:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload images' });
+      }
+    }
+
+    // Update the issue with Prisma transaction to handle images
     const updatedIssue = await prisma.$transaction(async (prisma) => {
       // Update the issue
       const updatedIssue = await prisma.issue.update({
@@ -358,17 +382,25 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
         },
       });
 
-      // If new images are provided, handle them
-      if (images && Array.isArray(images)) {
-        // If images are being replaced, delete existing ones
-        if (req.body.replaceImages === true) {
-          await prisma.image.deleteMany({
-            where: { issueId: id },
-          });
+      // Handle image replacement if requested
+      if (shouldReplaceImages && issue.images.length > 0) {
+        // Delete old images from S3
+        try {
+          await deleteMultipleFiles(issue.images.map(img => img.url));
+        } catch (deleteError) {
+          console.error('Error deleting old images from S3:', deleteError);
+          // Continue with the update even if S3 deletion fails
         }
 
-        // Add new images
-        for (const imageUrl of images) {
+        // Delete old image records from the database
+        await prisma.image.deleteMany({
+          where: { issueId: id },
+        });
+      }
+
+      // Add new images
+      if (newImageUrls.length > 0) {
+        for (const imageUrl of newImageUrls) {
           await prisma.image.create({
             data: {
               url: imageUrl,
@@ -565,9 +597,12 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
 
     const { id } = req.params;
 
-    // Find the issue to check ownership
+    // Find the issue to check ownership and get images
     const issue = await prisma.issue.findUnique({
       where: { id },
+      include: {
+        images: true,
+      },
     });
 
     if (!issue) {
@@ -580,6 +615,16 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!isAuthor && !isAdmin) {
       return res.status(403).json({ error: 'Forbidden: You do not have permission to delete this issue' });
+    }
+
+    // Delete images from S3 if they exist
+    if (issue.images.length > 0) {
+      try {
+        await deleteMultipleFiles(issue.images.map(img => img.url));
+      } catch (deleteError) {
+        console.error('Error deleting images from S3:', deleteError);
+        // Continue with the database deletion even if S3 deletion fails
+      }
     }
 
     // Delete all related data using Prisma transaction
@@ -607,7 +652,7 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
         },
       });
 
-      // Delete related images
+      // Delete related images from database
       await prisma.image.deleteMany({
         where: {
           issueId: id,

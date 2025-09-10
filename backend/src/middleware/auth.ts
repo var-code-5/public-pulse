@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import admin from '../utils/firebase/admin';
 
-// Extended Request interface to include user property
+// Extended Request interface to include user property and files from multer
 export interface AuthenticatedRequest extends Request {
   user?: {
     uid: string;
@@ -9,6 +9,8 @@ export interface AuthenticatedRequest extends Request {
     role?: string;
     id?: string;
   };
+  file?: Express.Multer.File;
+  files?: Express.Multer.File[];
 }
 
 /**

@@ -8,6 +8,7 @@ import voteRoutes from './voteRoutes';
 import notificationRoutes from './notificationRoutes';
 import departmentRoutes from './departmentRoutes';
 import userRoutes from './userRoutes';
+import imageRoutes from './imageRoutes';
 
 const router = Router();
 
@@ -23,5 +24,6 @@ router.use('/votes', voteRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/departments', departmentRoutes);
 router.use('/users', userRoutes);
+router.use('/images', imageRoutes);
 
 export default router;
