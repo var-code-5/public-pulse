@@ -1,3 +1,4 @@
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -5,8 +6,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { icons } from "@/assets/constants/icons";
 
 export default function Index() {
+  const router = useRouter();
   const [userName, setUserName] = useState("Ayush");
   const [currentDate, setCurrentDate] = useState("2 July, 2025");
+  
+  const handleReportProblem = () => {
+    router.push("/report/report");
+  };
   
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -97,7 +103,10 @@ export default function Index() {
 
         {/* Report Button */}
         <View className="items-center my-4">
-          <TouchableOpacity className="bg-purple-900 px-6 py-3 rounded-full shadow-lg flex-row items-center">
+          <TouchableOpacity 
+            className="bg-purple-900 px-6 py-3 rounded-full shadow-lg flex-row items-center"
+            onPress={handleReportProblem}
+          >
             <icons.Report width={20} height={20} fill="#ffffff" style={{ marginRight: 8 }} />
             <Text className="text-white font-medium text-center">Report a Problem</Text>
           </TouchableOpacity>
