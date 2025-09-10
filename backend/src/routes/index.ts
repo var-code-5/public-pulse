@@ -1,10 +1,13 @@
 import { Router } from 'express';
-import userRoutes from './userRoutes';
-import postRoutes from './postRoutes';
+import citizenRoutes from './citizen';
+import governmentRoutes from './government';
+import adminRoutes from './admin';
 
 const router = Router();
 
-router.use('/users', userRoutes);
-router.use('/posts', postRoutes);
+// User type specific routes
+router.use('/citizen', citizenRoutes);
+router.use('/government', governmentRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;
