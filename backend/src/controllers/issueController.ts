@@ -54,13 +54,13 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
       // Create the issue with AI-determined severity and department
       const newIssue = await prisma.issue.create({
         data: {
-          title,
-          description,
-          latitude,
-          longitude,
+          title: title,
+          description: description,
+          latitude: Number(latitude),
+          longitude: Number(longitude),
           severity: analysisResult.severity,
           departmentId: analysisResult.departmentId,
-          authorId,
+          authorId: authorId,
         },
       });
 
