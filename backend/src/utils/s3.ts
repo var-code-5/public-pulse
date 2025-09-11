@@ -26,7 +26,7 @@ export const uploadFile = async (file: Express.Multer.File): Promise<string> => 
     Key: fileKey,
     Body: file.buffer,
     ContentType: file.mimetype,
-    // ACL: 'public-read', // Make the file publicly accessible
+    // ACL: 'public-read', // Removed as bucket doesn't allow ACLs
   };
 
   try {
@@ -81,6 +81,22 @@ export const deleteMultipleFiles = async (fileUrls: string[]): Promise<{ message
   const deletePromises = fileUrls.map(url => deleteFile(url));
   await Promise.all(deletePromises);
   return { message: 'All files deleted successfully' };
+};
+
+/**
+ * Generate a pre-signed URL for a specific S3 object
+ * @param key - The key (path) of the object in the S3 bucket
+ * @param expiresIn - Number of seconds until the URL expires (default: 1 hour)
+ * @returns Pre-signed URL for accessing the object
+ */
+export const getSignedUrl = (key: string, expiresIn: number = 3600): string => {
+  const params = {
+    Bucket: BUCKET_NAME,
+    Key: key,
+    Expires: expiresIn
+  };
+
+  return s3.getSignedUrl('getObject', params);
 };
 
 /**
