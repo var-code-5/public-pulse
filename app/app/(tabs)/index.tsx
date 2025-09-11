@@ -1,14 +1,41 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
-import { ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
+import { useState, useEffect } from "react";
+import { ScrollView, StatusBar, Text, TouchableOpacity, View, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useIssues } from "@/context";
+import { useLocation } from "@/hooks";
 
 import { icons } from "@/assets/constants/icons";
 
 export default function Index() {
   const router = useRouter();
   const [userName, setUserName] = useState("Ayush");
-  const [currentDate, setCurrentDate] = useState("2 July, 2025");
+  const { issues, nearbyIssues, isLoading, error, fetchIssues, fetchNearbyIssues } = useIssues();
+  const { location, loading: locationLoading, getCurrentLocation } = useLocation();
+  
+  // Format current date
+  const currentDate = new Date().toLocaleDateString('en-US', { 
+    day: 'numeric', 
+    month: 'long', 
+    year: 'numeric' 
+  });
+  
+  // Fetch issues when component loads
+  useEffect(() => {
+    fetchIssues();
+  }, []);
+  
+  // Fetch nearby issues when location is available
+  useEffect(() => {
+    const getNearbyIssues = async () => {
+      await getCurrentLocation();
+      if (location) {
+        fetchNearbyIssues(location.latitude, location.longitude);
+      }
+    };
+    
+    getNearbyIssues();
+  }, []);
   
   const handleReportProblem = () => {
     router.push("/report/report");
@@ -84,27 +111,81 @@ export default function Index() {
               <View className="w-2 h-2 bg-purple-500 rounded-full mr-1" />
               <Text className="text-xs">Your Location</Text>
             </View>
-            <TouchableOpacity className="absolute top-3 right-3 bg-white p-2 rounded-full z-10 shadow-sm">
+            <TouchableOpacity 
+              className="absolute top-3 right-3 bg-white p-2 rounded-full z-10 shadow-sm"
+              onPress={getCurrentLocation}
+            >
               <icons.CameraAlt width={20} height={20} />
             </TouchableOpacity>
             <View className="bg-blue-100 w-full h-64 items-center justify-center">
-              <Text className="text-blue-800 text-sm mb-20">Map of Bengaluru</Text>
+              {locationLoading ? (
+                <ActivityIndicator size="large" color="#6366F1" />
+              ) : location ? (
+                <Text className="text-blue-800 text-sm mb-20">
+                  Location: {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+                </Text>
+              ) : (
+                <Text className="text-blue-800 text-sm mb-20">Tap the camera icon to get location</Text>
+              )}
             </View>
-            <View className="absolute inset-0 justify-center items-center">
-              <View className="w-8 h-8 bg-blue-500 rounded-full opacity-30" />
-              <View className="w-4 h-4 bg-blue-500 rounded-full" />
-              <View className="w-1 h-10 bg-blue-500" style={{ position: 'absolute', top: '55%' }} />
-            </View>
-            <Text className="absolute top-1/2 left-1/2 -translate-x-16 -translate-y-3 text-lg font-bold text-gray-800">
-              Bengaluru
-            </Text>
+            {location && (
+              <View className="absolute inset-0 justify-center items-center">
+                <View className="w-8 h-8 bg-blue-500 rounded-full opacity-30" />
+                <View className="w-4 h-4 bg-blue-500 rounded-full" />
+                <View className="w-1 h-10 bg-blue-500" style={{ position: 'absolute', top: '55%' }} />
+              </View>
+            )}
           </View>
+        </View>
+        
+        {/* Nearby Issues */}
+        <View className="mx-5 my-2">
+          <View className="flex-row justify-between items-center mb-2">
+            <Text className="text-lg font-bold">Nearby Issues</Text>
+            <TouchableOpacity onPress={() => router.push("/issues/_layout")}>
+              <Text className="text-purple-600">View All</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#6366F1" />
+          ) : error ? (
+            <Text className="text-red-500">{error}</Text>
+          ) : nearbyIssues && nearbyIssues.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {nearbyIssues.slice(0, 5).map((issue) => (
+                <TouchableOpacity 
+                  key={issue.id} 
+                  className="bg-white mr-3 rounded-lg shadow p-3 w-64"
+                  onPress={() => router.push(`/issues/${issue.id}`)}
+                >
+                  <Text className="font-bold text-base" numberOfLines={1}>{issue.title}</Text>
+                  <Text className="text-gray-600 text-xs mt-1" numberOfLines={2}>{issue.description}</Text>
+                  <View className="flex-row justify-between items-center mt-2">
+                    <View className="flex-row items-center">
+                      <View className={`w-2 h-2 rounded-full ${
+                        issue.status === 'PENDING' ? 'bg-yellow-500' :
+                        issue.status === 'ONGOING' ? 'bg-blue-500' :
+                        issue.status === 'PAUSED' ? 'bg-orange-500' : 'bg-green-500'
+                      } mr-1`} />
+                      <Text className="text-xs text-gray-500">{issue.status}</Text>
+                    </View>
+                    <Text className="text-xs text-gray-500">
+                      {new Date(issue.createdAt).toLocaleDateString()}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <Text className="text-gray-500 italic">No nearby issues found</Text>
+          )}
         </View>
 
         {/* Report Button */}
         <View className="items-center my-4">
           <TouchableOpacity 
-            className="bg-purple-900 px-6 py-3 rounded-full shadow-lg flex-row items-center"
+            className="bg-background-b px-6 py-3 rounded-full shadow-lg flex-row items-center"
             onPress={handleReportProblem}
           >
             <icons.Report width={20} height={20} fill="#ffffff" style={{ marginRight: 8 }} />
