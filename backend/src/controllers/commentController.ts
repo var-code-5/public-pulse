@@ -1,16 +1,21 @@
-import { Response } from 'express';
-import prisma from '../utils/prisma';
-import { AuthenticatedRequest } from '../middleware/auth';
+import { Response } from "express";
+import prisma from "../utils/prisma";
+import { AuthenticatedRequest } from "../middleware/auth";
 
 /**
  * Create a new comment
  * @param req - Express request object with authenticated user and comment data
  * @param res - Express response object
  */
-export const createComment = async (req: AuthenticatedRequest, res: Response) => {
+export const createComment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { content, issueId, parentId } = req.body;
@@ -18,11 +23,11 @@ export const createComment = async (req: AuthenticatedRequest, res: Response) =>
 
     // Validate required fields
     if (!content) {
-      return res.status(400).json({ error: 'Comment content is required' });
+      return res.status(400).json({ error: "Comment content is required" });
     }
 
     if (!issueId) {
-      return res.status(400).json({ error: 'Issue ID is required' });
+      return res.status(400).json({ error: "Issue ID is required" });
     }
 
     // Check if the issue exists
@@ -31,7 +36,7 @@ export const createComment = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // If parentId is provided, check if the parent comment exists
@@ -41,7 +46,7 @@ export const createComment = async (req: AuthenticatedRequest, res: Response) =>
       });
 
       if (!parentComment) {
-        return res.status(404).json({ error: 'Parent comment not found' });
+        return res.status(404).json({ error: "Parent comment not found" });
       }
     }
 
@@ -94,12 +99,12 @@ export const createComment = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     res.status(201).json({
-      message: 'Comment created successfully',
+      message: "Comment created successfully",
       comment,
     });
   } catch (error) {
-    console.error('Error creating comment:', error);
-    res.status(500).json({ error: 'Failed to create comment' });
+    console.error("Error creating comment:", error);
+    res.status(500).json({ error: "Failed to create comment" });
   }
 };
 
@@ -108,32 +113,29 @@ export const createComment = async (req: AuthenticatedRequest, res: Response) =>
  * @param req - Express request object with issue ID
  * @param res - Express response object
  */
-export const getIssueComments = async (req: AuthenticatedRequest, res: Response) => {
+export const getIssueComments = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const { issueId } = req.params;
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
-    const parentId = req.query.parentId as string | undefined;
 
-    // Calculate skip value for pagination
-    const skip = (page - 1) * limit;
-
-    // Build where clause for filtering
-    const where: any = {
+    // We'll only get top-level comments with pagination
+    const where = {
       issueId,
+      parentId: null, // Only get top-level comments
     };
-
-    if (parentId === 'null') {
-      where.parentId = null; // Only get top-level comments
-    } else if (parentId) {
-      where.parentId = parentId; // Get replies to a specific comment
-    }
 
     // Get total count for pagination
     const total = await prisma.comment.count({ where });
 
-    // Get comments with pagination
-    const comments = await prisma.comment.findMany({
+    // Calculate skip value for pagination
+    const skip = (page - 1) * limit;
+
+    // Get top-level comments with pagination
+    const parentComments = await prisma.comment.findMany({
       where,
       include: {
         author: {
@@ -150,50 +152,115 @@ export const getIssueComments = async (req: AuthenticatedRequest, res: Response)
         },
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: "desc",
       },
       skip,
       take: limit,
     });
 
-    // Calculate votes for each comment
-    const commentsWithVotes = await Promise.all(
-      comments.map(async (comment) => {
-        const upvotes = await prisma.vote.count({
+    // Process parent comments and fetch their children
+    const commentsWithReplies = await Promise.all(
+      parentComments.map(async (parentComment) => {
+        // Get all replies for this parent comment
+        const childComments = await prisma.comment.findMany({
           where: {
-            commentId: comment.id,
-            type: 'UPVOTE',
+            parentId: parentComment.id,
+          },
+          include: {
+            author: {
+              select: {
+                id: true,
+                name: true,
+                role: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: "asc", // Show oldest replies first
           },
         });
 
-        const downvotes = await prisma.vote.count({
+        // Process vote counts for parent comment
+        const parentUpvotes = await prisma.vote.count({
           where: {
-            commentId: comment.id,
-            type: 'DOWNVOTE',
+            commentId: parentComment.id,
+            type: "UPVOTE",
           },
         });
 
-        // Check if the current user has voted on this comment
-        let userVote = null;
+        const parentDownvotes = await prisma.vote.count({
+          where: {
+            commentId: parentComment.id,
+            type: "DOWNVOTE",
+          },
+        });
+
+        // Check if the current user has voted on the parent comment
+        let parentUserVote = null;
         if (req.user && req.user.id) {
           const vote = await prisma.vote.findFirst({
             where: {
-              commentId: comment.id,
+              commentId: parentComment.id,
               userId: req.user.id,
             },
           });
-          
+
           if (vote) {
-            userVote = vote.type;
+            parentUserVote = vote.type;
           }
         }
 
+        // Process child comments with votes
+        const childCommentsWithVotes = await Promise.all(
+          childComments.map(async (childComment) => {
+            const upvotes = await prisma.vote.count({
+              where: {
+                commentId: childComment.id,
+                type: "UPVOTE",
+              },
+            });
+
+            const downvotes = await prisma.vote.count({
+              where: {
+                commentId: childComment.id,
+                type: "DOWNVOTE",
+              },
+            });
+
+            // Check if the current user has voted on this child comment
+            let userVote = null;
+            if (req.user && req.user.id) {
+              const vote = await prisma.vote.findFirst({
+                where: {
+                  commentId: childComment.id,
+                  userId: req.user.id,
+                },
+              });
+
+              if (vote) {
+                userVote = vote.type;
+              }
+            }
+
+            return {
+              ...childComment,
+              votes: {
+                upvotes,
+                downvotes,
+                userVote,
+              },
+            };
+          })
+        );
+
+        // Return parent comment with its replies included
         return {
-          ...comment,
+          ...parentComment,
+          replies: childCommentsWithVotes,
           votes: {
-            upvotes,
-            downvotes,
-            userVote,
+            upvotes: parentUpvotes,
+            downvotes: parentDownvotes,
+            userVote: parentUserVote,
           },
         };
       })
@@ -202,7 +269,7 @@ export const getIssueComments = async (req: AuthenticatedRequest, res: Response)
     const totalPages = Math.ceil(total / limit);
 
     res.json({
-      comments: commentsWithVotes,
+      comments: commentsWithReplies,
       pagination: {
         total,
         page,
@@ -211,8 +278,8 @@ export const getIssueComments = async (req: AuthenticatedRequest, res: Response)
       },
     });
   } catch (error) {
-    console.error('Error fetching comments:', error);
-    res.status(500).json({ error: 'Failed to fetch comments' });
+    console.error("Error fetching comments:", error);
+    res.status(500).json({ error: "Failed to fetch comments" });
   }
 };
 
@@ -221,10 +288,15 @@ export const getIssueComments = async (req: AuthenticatedRequest, res: Response)
  * @param req - Express request object with comment ID and update data
  * @param res - Express response object
  */
-export const updateComment = async (req: AuthenticatedRequest, res: Response) => {
+export const updateComment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
@@ -236,20 +308,22 @@ export const updateComment = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     if (!comment) {
-      return res.status(404).json({ error: 'Comment not found' });
+      return res.status(404).json({ error: "Comment not found" });
     }
 
     // Check if the user is the author or an admin
     const isAuthor = comment.authorId === req.user.id;
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = req.user.role === "ADMIN";
 
     if (!isAuthor && !isAdmin) {
-      return res.status(403).json({ error: 'Forbidden: You do not have permission to update this comment' });
+      return res.status(403).json({
+        error: "Forbidden: You do not have permission to update this comment",
+      });
     }
 
     // Validate content
     if (!content) {
-      return res.status(400).json({ error: 'Comment content is required' });
+      return res.status(400).json({ error: "Comment content is required" });
     }
 
     // Update the comment
@@ -270,12 +344,12 @@ export const updateComment = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     res.json({
-      message: 'Comment updated successfully',
+      message: "Comment updated successfully",
       comment: updatedComment,
     });
   } catch (error) {
-    console.error('Error updating comment:', error);
-    res.status(500).json({ error: 'Failed to update comment' });
+    console.error("Error updating comment:", error);
+    res.status(500).json({ error: "Failed to update comment" });
   }
 };
 
@@ -284,10 +358,15 @@ export const updateComment = async (req: AuthenticatedRequest, res: Response) =>
  * @param req - Express request object with comment ID
  * @param res - Express response object
  */
-export const deleteComment = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteComment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
@@ -298,15 +377,17 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     if (!comment) {
-      return res.status(404).json({ error: 'Comment not found' });
+      return res.status(404).json({ error: "Comment not found" });
     }
 
     // Check if the user is the author or an admin
     const isAuthor = comment.authorId === req.user.id;
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = req.user.role === "ADMIN";
 
     if (!isAuthor && !isAdmin) {
-      return res.status(403).json({ error: 'Forbidden: You do not have permission to delete this comment' });
+      return res.status(403).json({
+        error: "Forbidden: You do not have permission to delete this comment",
+      });
     }
 
     // Delete all related data using Prisma transaction
@@ -343,10 +424,10 @@ export const deleteComment = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     res.json({
-      message: 'Comment deleted successfully',
+      message: "Comment deleted successfully",
     });
   } catch (error) {
-    console.error('Error deleting comment:', error);
-    res.status(500).json({ error: 'Failed to delete comment' });
+    console.error("Error deleting comment:", error);
+    res.status(500).json({ error: "Failed to delete comment" });
   }
 };

@@ -1,8 +1,9 @@
-import { Response } from 'express';
-import prisma from '../utils/prisma';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { IssueStatus } from '../generated/prisma';
-import { uploadMultipleFiles, deleteMultipleFiles } from '../utils/s3';
+import { Response } from "express";
+import prisma from "../utils/prisma";
+import { AuthenticatedRequest } from "../middleware/auth";
+import { IssueStatus } from "../generated/prisma";
+import { uploadMultipleFiles, deleteMultipleFiles } from "../utils/s3";
+import { analyzeIssue } from "../utils/ai/issueAnalysisWorkflow";
 
 /**
  * Create a new issue
@@ -12,16 +13,30 @@ import { uploadMultipleFiles, deleteMultipleFiles } from '../utils/s3';
 export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
-    const { title, description, latitude, longitude, severity } = req.body;
+    const { title, description, latitude, longitude } = req.body;
     const authorId = req.user.id;
 
     // Validate required fields
-    if (!title || !description || latitude === undefined || longitude === undefined) {
-      return res.status(400).json({ error: 'Title, description, latitude, and longitude are required' });
+    if (
+      !title ||
+      !description ||
+      latitude === undefined ||
+      longitude === undefined
+    ) {
+      return res
+        .status(400)
+        .json({
+          error: "Title, description, latitude, and longitude are required",
+        });
     }
+
+    // Use AI to analyze the issue and determine severity and department
+    const analysisResult = await analyzeIssue(title, description);
 
     // Upload images to S3 if they exist
     let imageUrls: string[] = [];
@@ -29,22 +44,23 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
       try {
         imageUrls = await uploadMultipleFiles(req.files);
       } catch (uploadError) {
-        console.error('Error uploading images to S3:', uploadError);
-        return res.status(500).json({ error: 'Failed to upload images' });
+        console.error("Error uploading images to S3:", uploadError);
+        return res.status(500).json({ error: "Failed to upload images" });
       }
     }
 
     // Create a new issue with Prisma transaction to handle images
     const issue = await prisma.$transaction(async (prisma) => {
-      // Create the issue
+      // Create the issue with AI-determined severity and department
       const newIssue = await prisma.issue.create({
         data: {
-          title,
-          description,
-          latitude,
-          longitude,
-          severity: severity || 0,
-          authorId,
+          title: title,
+          description: description,
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+          severity: analysisResult.severity,
+          departmentId: analysisResult.departmentId,
+          authorId: authorId,
         },
       });
 
@@ -73,17 +89,18 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
             name: true,
           },
         },
+        department: true,
         images: true,
       },
     });
 
     res.status(201).json({
-      message: 'Issue created successfully',
+      message: "Issue created successfully",
       issue: fullIssue,
     });
   } catch (error) {
-    console.error('Error creating issue:', error);
-    res.status(500).json({ error: 'Failed to create issue' });
+    console.error("Error creating issue:", error);
+    res.status(500).json({ error: "Failed to create issue" });
   }
 };
 
@@ -92,7 +109,10 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
  * @param req - Express request object with query parameters
  * @param res - Express response object
  */
-export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => {
+export const getAllIssues = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     // Parse query parameters for pagination and filtering
     const page = Number(req.query.page) || 1;
@@ -106,19 +126,19 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
 
     // Build where clause for filtering
     const where: any = {};
-    
+
     if (status) {
       where.status = status;
     }
-    
+
     if (departmentId) {
       where.departmentId = departmentId;
     }
-    
+
     if (search) {
       where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } }
+        { title: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -145,7 +165,7 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
         },
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: "desc",
       },
       skip,
       take: limit,
@@ -157,14 +177,14 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
         const upvotes = await prisma.vote.count({
           where: {
             issueId: issue.id,
-            type: 'UPVOTE',
+            type: "UPVOTE",
           },
         });
 
         const downvotes = await prisma.vote.count({
           where: {
             issueId: issue.id,
-            type: 'DOWNVOTE',
+            type: "DOWNVOTE",
           },
         });
 
@@ -177,7 +197,7 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
               userId: req.user.id,
             },
           });
-          
+
           if (vote) {
             userVote = vote.type;
           }
@@ -206,8 +226,8 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
       },
     });
   } catch (error) {
-    console.error('Error fetching issues:', error);
-    res.status(500).json({ error: 'Failed to fetch issues' });
+    console.error("Error fetching issues:", error);
+    res.status(500).json({ error: "Failed to fetch issues" });
   }
 };
 
@@ -216,7 +236,10 @@ export const getAllIssues = async (req: AuthenticatedRequest, res: Response) => 
  * @param req - Express request object with issue ID
  * @param res - Express response object
  */
-export const getIssueById = async (req: AuthenticatedRequest, res: Response) => {
+export const getIssueById = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const { id } = req.params;
 
@@ -251,7 +274,7 @@ export const getIssueById = async (req: AuthenticatedRequest, res: Response) => 
             },
           },
           orderBy: {
-            createdAt: 'desc',
+            createdAt: "desc",
           },
           take: 10,
         },
@@ -266,28 +289,28 @@ export const getIssueById = async (req: AuthenticatedRequest, res: Response) => 
             },
           },
           orderBy: {
-            changedAt: 'desc',
+            changedAt: "desc",
           },
         },
       },
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // Get vote counts
     const upvotes = await prisma.vote.count({
       where: {
         issueId: id,
-        type: 'UPVOTE',
+        type: "UPVOTE",
       },
     });
 
     const downvotes = await prisma.vote.count({
       where: {
         issueId: id,
-        type: 'DOWNVOTE',
+        type: "DOWNVOTE",
       },
     });
 
@@ -300,7 +323,7 @@ export const getIssueById = async (req: AuthenticatedRequest, res: Response) => 
           userId: req.user.id,
         },
       });
-      
+
       if (vote) {
         userVote = vote.type;
       }
@@ -317,8 +340,8 @@ export const getIssueById = async (req: AuthenticatedRequest, res: Response) => 
 
     res.json({ issue: issueWithVotes });
   } catch (error) {
-    console.error('Error fetching issue:', error);
-    res.status(500).json({ error: 'Failed to fetch issue' });
+    console.error("Error fetching issue:", error);
+    res.status(500).json({ error: "Failed to fetch issue" });
   }
 };
 
@@ -330,12 +353,15 @@ export const getIssueById = async (req: AuthenticatedRequest, res: Response) => 
 export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
     const { title, description, latitude, longitude, severity } = req.body;
-    const shouldReplaceImages = req.body.replaceImages === 'true' || req.body.replaceImages === true;
+    const shouldReplaceImages =
+      req.body.replaceImages === "true" || req.body.replaceImages === true;
 
     // Find the issue to check ownership
     const issue = await prisma.issue.findUnique({
@@ -346,15 +372,20 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // Check if the user is the author or an admin/government official
     const isAuthor = issue.authorId === req.user.id;
-    const isAdminOrGovernment = req.user.role === 'ADMIN' || req.user.role === 'GOVERNMENT';
+    const isAdminOrGovernment =
+      req.user.role === "ADMIN" || req.user.role === "GOVERNMENT";
 
     if (!isAuthor && !isAdminOrGovernment) {
-      return res.status(403).json({ error: 'Forbidden: You do not have permission to update this issue' });
+      return res
+        .status(403)
+        .json({
+          error: "Forbidden: You do not have permission to update this issue",
+        });
     }
 
     // Upload new images to S3 if they exist
@@ -363,8 +394,8 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
       try {
         newImageUrls = await uploadMultipleFiles(req.files);
       } catch (uploadError) {
-        console.error('Error uploading images to S3:', uploadError);
-        return res.status(500).json({ error: 'Failed to upload images' });
+        console.error("Error uploading images to S3:", uploadError);
+        return res.status(500).json({ error: "Failed to upload images" });
       }
     }
 
@@ -386,9 +417,9 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
       if (shouldReplaceImages && issue.images.length > 0) {
         // Delete old images from S3
         try {
-          await deleteMultipleFiles(issue.images.map(img => img.url));
+          await deleteMultipleFiles(issue.images.map((img) => img.url));
         } catch (deleteError) {
-          console.error('Error deleting old images from S3:', deleteError);
+          console.error("Error deleting old images from S3:", deleteError);
           // Continue with the update even if S3 deletion fails
         }
 
@@ -428,12 +459,12 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     res.json({
-      message: 'Issue updated successfully',
+      message: "Issue updated successfully",
       issue: fullUpdatedIssue,
     });
   } catch (error) {
-    console.error('Error updating issue:', error);
-    res.status(500).json({ error: 'Failed to update issue' });
+    console.error("Error updating issue:", error);
+    res.status(500).json({ error: "Failed to update issue" });
   }
 };
 
@@ -442,18 +473,26 @@ export const updateIssue = async (req: AuthenticatedRequest, res: Response) => {
  * @param req - Express request object with issue ID and new status
  * @param res - Express response object
  */
-export const updateIssueStatus = async (req: AuthenticatedRequest, res: Response) => {
+export const updateIssueStatus = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
     const { status } = req.body;
 
     // Validate status
-    if (!status || !Object.values(IssueStatus).includes(status as IssueStatus)) {
-      return res.status(400).json({ error: 'Invalid status value' });
+    if (
+      !status ||
+      !Object.values(IssueStatus).includes(status as IssueStatus)
+    ) {
+      return res.status(400).json({ error: "Invalid status value" });
     }
 
     // Check if issue exists
@@ -462,12 +501,17 @@ export const updateIssueStatus = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // Only government officials and admins can update issue status
-    if (req.user.role !== 'GOVERNMENT' && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Forbidden: Only government officials and admins can update issue status' });
+    if (req.user.role !== "GOVERNMENT" && req.user.role !== "ADMIN") {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Forbidden: Only government officials and admins can update issue status",
+        });
     }
 
     // Update the status and create a status history entry
@@ -502,12 +546,12 @@ export const updateIssueStatus = async (req: AuthenticatedRequest, res: Response
     });
 
     res.json({
-      message: 'Issue status updated successfully',
+      message: "Issue status updated successfully",
       issue: updatedIssue,
     });
   } catch (error) {
-    console.error('Error updating issue status:', error);
-    res.status(500).json({ error: 'Failed to update issue status' });
+    console.error("Error updating issue status:", error);
+    res.status(500).json({ error: "Failed to update issue status" });
   }
 };
 
@@ -516,10 +560,15 @@ export const updateIssueStatus = async (req: AuthenticatedRequest, res: Response
  * @param req - Express request object with issue ID and department ID
  * @param res - Express response object
  */
-export const assignIssueToDepartment = async (req: AuthenticatedRequest, res: Response) => {
+export const assignIssueToDepartment = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
@@ -531,12 +580,17 @@ export const assignIssueToDepartment = async (req: AuthenticatedRequest, res: Re
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // Only government officials and admins can assign issues to departments
-    if (req.user.role !== 'GOVERNMENT' && req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Forbidden: Only government officials and admins can assign issues to departments' });
+    if (req.user.role !== "GOVERNMENT" && req.user.role !== "ADMIN") {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Forbidden: Only government officials and admins can assign issues to departments",
+        });
     }
 
     // If departmentId is provided, verify it exists
@@ -546,7 +600,7 @@ export const assignIssueToDepartment = async (req: AuthenticatedRequest, res: Re
       });
 
       if (!department) {
-        return res.status(404).json({ error: 'Department not found' });
+        return res.status(404).json({ error: "Department not found" });
       }
     }
 
@@ -574,13 +628,13 @@ export const assignIssueToDepartment = async (req: AuthenticatedRequest, res: Re
 
     res.json({
       message: departmentId
-        ? 'Issue assigned to department successfully'
-        : 'Issue removed from department successfully',
+        ? "Issue assigned to department successfully"
+        : "Issue removed from department successfully",
       issue: updatedIssue,
     });
   } catch (error) {
-    console.error('Error assigning issue to department:', error);
-    res.status(500).json({ error: 'Failed to assign issue to department' });
+    console.error("Error assigning issue to department:", error);
+    res.status(500).json({ error: "Failed to assign issue to department" });
   }
 };
 
@@ -592,7 +646,9 @@ export const assignIssueToDepartment = async (req: AuthenticatedRequest, res: Re
 export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { id } = req.params;
@@ -606,23 +662,27 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+      return res.status(404).json({ error: "Issue not found" });
     }
 
     // Check if the user is the author or an admin
     const isAuthor = issue.authorId === req.user.id;
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = req.user.role === "ADMIN";
 
     if (!isAuthor && !isAdmin) {
-      return res.status(403).json({ error: 'Forbidden: You do not have permission to delete this issue' });
+      return res
+        .status(403)
+        .json({
+          error: "Forbidden: You do not have permission to delete this issue",
+        });
     }
 
     // Delete images from S3 if they exist
     if (issue.images.length > 0) {
       try {
-        await deleteMultipleFiles(issue.images.map(img => img.url));
+        await deleteMultipleFiles(issue.images.map((img) => img.url));
       } catch (deleteError) {
-        console.error('Error deleting images from S3:', deleteError);
+        console.error("Error deleting images from S3:", deleteError);
         // Continue with the database deletion even if S3 deletion fails
       }
     }
@@ -682,11 +742,11 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     res.json({
-      message: 'Issue deleted successfully',
+      message: "Issue deleted successfully",
     });
   } catch (error) {
-    console.error('Error deleting issue:', error);
-    res.status(500).json({ error: 'Failed to delete issue' });
+    console.error("Error deleting issue:", error);
+    res.status(500).json({ error: "Failed to delete issue" });
   }
 };
 
@@ -695,14 +755,19 @@ export const deleteIssue = async (req: AuthenticatedRequest, res: Response) => {
  * @param req - Express request object with latitude, longitude, and radius
  * @param res - Express response object
  */
-export const getNearbyIssues = async (req: AuthenticatedRequest, res: Response) => {
+export const getNearbyIssues = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const latitude = parseFloat(req.query.latitude as string);
     const longitude = parseFloat(req.query.longitude as string);
     const radius = parseFloat(req.query.radius as string) || 5; // default 5km radius
 
     if (isNaN(latitude) || isNaN(longitude)) {
-      return res.status(400).json({ error: 'Valid latitude and longitude are required' });
+      return res
+        .status(400)
+        .json({ error: "Valid latitude and longitude are required" });
     }
 
     // Use raw SQL for distance calculation
@@ -750,14 +815,14 @@ export const getNearbyIssues = async (req: AuthenticatedRequest, res: Response) 
         const upvotes = await prisma.vote.count({
           where: {
             issueId: issue.id,
-            type: 'UPVOTE',
+            type: "UPVOTE",
           },
         });
 
         const downvotes = await prisma.vote.count({
           where: {
             issueId: issue.id,
-            type: 'DOWNVOTE',
+            type: "DOWNVOTE",
           },
         });
 
@@ -781,7 +846,7 @@ export const getNearbyIssues = async (req: AuthenticatedRequest, res: Response) 
       },
     });
   } catch (error) {
-    console.error('Error fetching nearby issues:', error);
-    res.status(500).json({ error: 'Failed to fetch nearby issues' });
+    console.error("Error fetching nearby issues:", error);
+    res.status(500).json({ error: "Failed to fetch nearby issues" });
   }
 };

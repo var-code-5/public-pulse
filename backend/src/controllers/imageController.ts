@@ -1,7 +1,54 @@
-import { Response } from 'express';
-import prisma from '../utils/prisma';
-import { AuthenticatedRequest } from '../middleware/auth';
-import { deleteFile } from '../utils/s3';
+import { Response } from "express";
+import prisma from "../utils/prisma";
+import { AuthenticatedRequest } from "../middleware/auth";
+import { deleteFile } from "../utils/s3";
+
+/**
+ * Get images by user ID
+ * @param req - Express request object with authenticated user and target user ID
+ * @param res - Express response object
+ */
+export const getImagesByUserId = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
+    }
+
+    const { userId } = req.params;
+
+    // Get all images from issues created by the user
+    const images = await prisma.image.findMany({
+      where: {
+        issue: {
+          authorId: userId,
+        },
+      },
+      include: {
+        issue: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.json({
+      images,
+    });
+  } catch (error) {
+    console.error("Error fetching images by user ID:", error);
+    res.status(500).json({ error: "Failed to fetch images" });
+  }
+};
 
 /**
  * Delete a specific image from an issue
@@ -11,7 +58,9 @@ import { deleteFile } from '../utils/s3';
 export const deleteImage = async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized: Authentication required" });
     }
 
     const { imageId } = req.params;
@@ -25,22 +74,27 @@ export const deleteImage = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     if (!image) {
-      return res.status(404).json({ error: 'Image not found' });
+      return res.status(404).json({ error: "Image not found" });
     }
 
     // Check if the user is the author of the issue or an admin
     const isAuthor = image.issue.authorId === req.user.id;
-    const isAdminOrGovernment = req.user.role === 'ADMIN' || req.user.role === 'GOVERNMENT';
+    const isAdminOrGovernment =
+      req.user.role === "ADMIN" || req.user.role === "GOVERNMENT";
 
     if (!isAuthor && !isAdminOrGovernment) {
-      return res.status(403).json({ error: 'Forbidden: You do not have permission to delete this image' });
+      return res
+        .status(403)
+        .json({
+          error: "Forbidden: You do not have permission to delete this image",
+        });
     }
 
     // Delete the image from S3
     try {
       await deleteFile(image.url);
     } catch (deleteError) {
-      console.error('Error deleting image from S3:', deleteError);
+      console.error("Error deleting image from S3:", deleteError);
       // Continue with the database deletion even if S3 deletion fails
     }
 
@@ -52,10 +106,10 @@ export const deleteImage = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     res.json({
-      message: 'Image deleted successfully',
+      message: "Image deleted successfully",
     });
   } catch (error) {
-    console.error('Error deleting image:', error);
-    res.status(500).json({ error: 'Failed to delete image' });
+    console.error("Error deleting image:", error);
+    res.status(500).json({ error: "Failed to delete image" });
   }
 };
