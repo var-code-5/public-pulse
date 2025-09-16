@@ -2,8 +2,37 @@ import { Response } from "express";
 import prisma from "../utils/prisma";
 import { AuthenticatedRequest } from "../middleware/auth";
 import { IssueStatus } from "../generated/prisma";
-import { uploadMultipleFiles, deleteMultipleFiles } from "../utils/s3";
+import { uploadMultipleFiles, deleteMultipleFiles, getSignedUrl, getKeyFromUrl } from "../utils/s3";
 import { analyzeIssue } from "../utils/ai/issueAnalysisWorkflow";
+
+/**
+ * Helper function to process issue objects and replace image URLs with signed URLs
+ * @param issues - Array of issue objects or single issue object with images
+ * @returns Issue(s) with signed URLs for images
+ */
+const processIssueImages = (issues: any | any[]) => {
+  // Handle both single issue and array of issues
+  const processImages = (issue: any) => {
+    if (issue.images && issue.images.length > 0) {
+      issue.images = issue.images.map((image: any) => {
+        const key = getKeyFromUrl(image.url);
+        const signedUrl = getSignedUrl(key, 3600); // 1 hour expiry
+        return {
+          ...image,
+          url: signedUrl,
+        };
+      });
+    }
+    return issue;
+  };
+
+  // Process single issue or array of issues
+  if (Array.isArray(issues)) {
+    return issues.map(issue => processImages(issue));
+  } else {
+    return processImages(issues);
+  }
+};
 
 /**
  * Create a new issue
@@ -94,9 +123,12 @@ export const createIssue = async (req: AuthenticatedRequest, res: Response) => {
       },
     });
 
+    // Process image URLs to generate signed URLs
+    const processedIssue = processIssueImages(fullIssue);
+
     res.status(201).json({
       message: "Issue created successfully",
-      issue: fullIssue,
+      issue: processedIssue,
     });
   } catch (error) {
     console.error("Error creating issue:", error);
@@ -214,10 +246,13 @@ export const getAllIssues = async (
       })
     );
 
+    // Process image URLs to generate signed URLs
+    const processedIssues = processIssueImages(issuesWithVoteCounts);
+    
     const totalPages = Math.ceil(total / limit);
 
     res.json({
-      issues: issuesWithVoteCounts,
+      issues: processedIssues,
       pagination: {
         total,
         page,
@@ -338,7 +373,10 @@ export const getIssueById = async (
       },
     };
 
-    res.json({ issue: issueWithVotes });
+    // Process image URLs to generate signed URLs
+    const processedIssue = processIssueImages(issueWithVotes);
+
+    res.json({ issue: processedIssue });
   } catch (error) {
     console.error("Error fetching issue:", error);
     res.status(500).json({ error: "Failed to fetch issue" });
