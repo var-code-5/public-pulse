@@ -1,7 +1,7 @@
 import { Response } from "express";
 import prisma from "../utils/prisma";
 import { AuthenticatedRequest } from "../middleware/auth";
-import { deleteFile } from "../utils/s3";
+import { deleteFile, getSignedUrl, getKeyFromUrl } from "../utils/s3";
 
 /**
  * Get images by user ID
@@ -41,8 +41,18 @@ export const getImagesByUserId = async (
       },
     });
 
+    // Generate pre-signed URLs for each image
+    const imagesWithSignedUrls = images.map(image => {
+      const key = getKeyFromUrl(image.url);
+      const signedUrl = getSignedUrl(key, 3600); // 1 hour expiry
+      return {
+        ...image,
+        url: signedUrl, // Replace the S3 URL with a pre-signed URL
+      };
+    });
+
     res.json({
-      images,
+      images: imagesWithSignedUrls,
     });
   } catch (error) {
     console.error("Error fetching images by user ID:", error);

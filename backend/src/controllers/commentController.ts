@@ -268,6 +268,13 @@ export const getIssueComments = async (
 
     const totalPages = Math.ceil(total / limit);
 
+    // Get total count of all comments (parents + replies) for this issue
+    const totalCommentsCount = await prisma.comment.count({
+      where: {
+        issueId,
+      },
+    });
+
     res.json({
       comments: commentsWithReplies,
       pagination: {
@@ -276,6 +283,7 @@ export const getIssueComments = async (
         limit,
         totalPages,
       },
+      totalComments: totalCommentsCount,
     });
   } catch (error) {
     console.error("Error fetching comments:", error);

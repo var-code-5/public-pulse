@@ -1,10 +1,15 @@
-import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import routes from './routes';
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import routes from "./routes";
+import fs from "fs";
+import path from "path";
 
-// Load environment variables
-dotenv.config();
+// Load environment variables - first try secrets directory for Docker
+const envPath = fs.existsSync("/app/secrets/.env")
+  ? "/app/secrets/.env"
+  : path.resolve(process.cwd(), ".env");
+dotenv.config({ path: envPath });
 
 // Create Express application
 const app = express();
@@ -22,18 +27,23 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // API routes
-app.use('/api', routes);
+app.use("/api", routes);
 
 // Root route
-app.get('/', (req: Request, res: Response) => {
-  res.json({ message: 'Welcome to Public Pulse API' });
+app.get("/", (req: Request, res: Response) => {
+  res.json({ message: "Welcome to Public Pulse API" });
+});
+
+// Health check endpoint for Docker
+app.get("/health", (req: Request, res: Response) => {
+  res.status(200).json({ status: "ok" });
 });
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);
   res.status(500).json({
-    error: 'Something went wrong!',
+    error: "Something went wrong!",
     message: err.message,
   });
 });
