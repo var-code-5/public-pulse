@@ -8,6 +8,7 @@ export interface Event {
   latitude?: number;
   longitude?: number;
   eventDate: Date;
+  imageUrl?: string;
   creatorId: string;
   creator?: User;
   createdAt: Date;

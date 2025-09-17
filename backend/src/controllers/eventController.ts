@@ -1,6 +1,34 @@
 import { Response } from "express";
 import prisma from "../utils/prisma";
 import { AuthenticatedRequest } from "../middleware/auth";
+import { uploadFile, getSignedUrl, getKeyFromUrl } from "../utils/s3";
+
+/**
+ * Helper function to process events and add signed URLs for images
+ * @param events - Array of event objects or single event object with images
+ * @returns Events with signed URLs for images
+ */
+const processEventImages = (events: any | any[]) => {
+  // Handle both single event and array of events
+  const processImage = (event: any) => {
+    if (event.imageUrl) {
+      const key = getKeyFromUrl(event.imageUrl);
+      const signedUrl = getSignedUrl(key, 3600); // 1 hour expiry
+      return {
+        ...event,
+        imageUrl: signedUrl,
+      };
+    }
+    return event;
+  };
+
+  // Process single event or array of events
+  if (Array.isArray(events)) {
+    return events.map(event => processImage(event));
+  } else {
+    return processImage(events);
+  }
+};
 
 /**
  * Create a new event
@@ -9,7 +37,8 @@ import { AuthenticatedRequest } from "../middleware/auth";
  */
 export const createEvent = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { title, description, location, latitude, longitude, eventDate } = req.body;
+    const { title, description, location, latitude, longitude, eventDate } =
+      req.body;
     const userId = req.user?.uid;
 
     if (!userId) {
@@ -34,11 +63,15 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response) => {
         latitude: latitude ? parseFloat(latitude) : null,
         longitude: longitude ? parseFloat(longitude) : null,
         eventDate: eventDate ? new Date(eventDate) : new Date(),
+        imageUrl: req.file ? await uploadFile(req.file) : null,
         creatorId: user.id,
       },
     });
 
-    return res.status(201).json(event);
+    // Process the image URL to return a signed URL
+    const processedEvent = processEventImages(event);
+
+    return res.status(201).json(processedEvent);
   } catch (error) {
     console.error("Error creating event:", error);
     return res.status(500).json({ message: "Failed to create event" });
@@ -50,10 +83,13 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response) => {
  * @param req - Express request object
  * @param res - Express response object
  */
-export const getAllEvents = async (req: AuthenticatedRequest, res: Response) => {
+export const getAllEvents = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const events = await prisma.event.findMany({
-      orderBy: { eventDate: 'asc' },
+      orderBy: { eventDate: "asc" },
       include: {
         creator: {
           select: {
@@ -66,7 +102,10 @@ export const getAllEvents = async (req: AuthenticatedRequest, res: Response) => 
       },
     });
 
-    return res.status(200).json(events);
+    // Process the events to include signed URLs for images
+    const processedEvents = processEventImages(events);
+
+    return res.status(200).json(processedEvents);
   } catch (error) {
     console.error("Error fetching events:", error);
     return res.status(500).json({ message: "Failed to fetch events" });
@@ -78,7 +117,10 @@ export const getAllEvents = async (req: AuthenticatedRequest, res: Response) => 
  * @param req - Express request object
  * @param res - Express response object
  */
-export const getEventById = async (req: AuthenticatedRequest, res: Response) => {
+export const getEventById = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const { id } = req.params;
 
@@ -100,7 +142,10 @@ export const getEventById = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(404).json({ message: "Event not found" });
     }
 
-    return res.status(200).json(event);
+    // Process the event to include signed URL for image
+    const processedEvent = processEventImages(event);
+
+    return res.status(200).json(processedEvent);
   } catch (error) {
     console.error("Error fetching event:", error);
     return res.status(500).json({ message: "Failed to fetch event" });
@@ -115,7 +160,8 @@ export const getEventById = async (req: AuthenticatedRequest, res: Response) => 
 export const updateEvent = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, description, location, latitude, longitude, eventDate } = req.body;
+    const { title, description, location, latitude, longitude, eventDate } =
+      req.body;
     const userId = req.user?.uid;
 
     if (!userId) {
@@ -141,8 +187,14 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Only the creator, admin, or government users can update the event
-    if (existingEvent.creatorId !== user.id && user.role !== 'ADMIN' && user.role !== 'GOVERNMENT') {
-      return res.status(403).json({ message: "Unauthorized to update this event" });
+    if (
+      existingEvent.creatorId !== user.id &&
+      user.role !== "ADMIN" &&
+      user.role !== "GOVERNMENT"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized to update this event" });
     }
 
     // Update the event
@@ -155,10 +207,14 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response) => {
         latitude: latitude ? parseFloat(latitude) : undefined,
         longitude: longitude ? parseFloat(longitude) : undefined,
         eventDate: eventDate ? new Date(eventDate) : undefined,
+        imageUrl: req.file ? await uploadFile(req.file) : undefined,
       },
     });
 
-    return res.status(200).json(updatedEvent);
+    // Process the event to include signed URL for image
+    const processedEvent = processEventImages(updatedEvent);
+
+    return res.status(200).json(processedEvent);
   } catch (error) {
     console.error("Error updating event:", error);
     return res.status(500).json({ message: "Failed to update event" });
@@ -198,8 +254,14 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Only the creator, admin, or government users can delete the event
-    if (existingEvent.creatorId !== user.id && user.role !== 'ADMIN' && user.role !== 'GOVERNMENT') {
-      return res.status(403).json({ message: "Unauthorized to delete this event" });
+    if (
+      existingEvent.creatorId !== user.id &&
+      user.role !== "ADMIN" &&
+      user.role !== "GOVERNMENT"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Unauthorized to delete this event" });
     }
 
     // Delete the event
@@ -219,17 +281,20 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
  * @param req - Express request object
  * @param res - Express response object
  */
-export const getUpcomingEvents = async (req: AuthenticatedRequest, res: Response) => {
+export const getUpcomingEvents = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const now = new Date();
-    
+
     const events = await prisma.event.findMany({
       where: {
         eventDate: {
           gte: now,
         },
       },
-      orderBy: { eventDate: 'asc' },
+      orderBy: { eventDate: "asc" },
       include: {
         creator: {
           select: {
@@ -242,7 +307,10 @@ export const getUpcomingEvents = async (req: AuthenticatedRequest, res: Response
       },
     });
 
-    return res.status(200).json(events);
+    // Process the events to include signed URLs for images
+    const processedEvents = processEventImages(events);
+
+    return res.status(200).json(processedEvents);
   } catch (error) {
     console.error("Error fetching upcoming events:", error);
     return res.status(500).json({ message: "Failed to fetch upcoming events" });
@@ -254,12 +322,17 @@ export const getUpcomingEvents = async (req: AuthenticatedRequest, res: Response
  * @param req - Express request object
  * @param res - Express response object
  */
-export const getNearbyEvents = async (req: AuthenticatedRequest, res: Response) => {
+export const getNearbyEvents = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const { latitude, longitude, radius = 10 } = req.query; // radius in kilometers, default 10
-    
+
     if (!latitude || !longitude) {
-      return res.status(400).json({ message: "Latitude and longitude are required" });
+      return res
+        .status(400)
+        .json({ message: "Latitude and longitude are required" });
     }
 
     const lat = parseFloat(latitude as string);
@@ -286,23 +359,28 @@ export const getNearbyEvents = async (req: AuthenticatedRequest, res: Response) 
 
     // Filter events by distance
     // Using the Haversine formula to calculate distance between two points on a sphere
-    const nearbyEvents = events.filter(event => {
+    const nearbyEvents = events.filter((event) => {
       if (!event.latitude || !event.longitude) return false;
-      
+
       const R = 6371; // Earth's radius in kilometers
-      const dLat = (event.latitude - lat) * Math.PI / 180;
-      const dLon = (event.longitude - lng) * Math.PI / 180;
-      const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat * Math.PI / 180) * Math.cos(event.latitude * Math.PI / 180) * 
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const dLat = ((event.latitude - lat) * Math.PI) / 180;
+      const dLon = ((event.longitude - lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat * Math.PI) / 180) *
+          Math.cos((event.latitude * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance = R * c;
-      
+
       return distance <= rad;
     });
 
-    return res.status(200).json(nearbyEvents);
+    // Process the events to include signed URLs for images
+    const processedEvents = processEventImages(nearbyEvents);
+
+    return res.status(200).json(processedEvents);
   } catch (error) {
     console.error("Error fetching nearby events:", error);
     return res.status(500).json({ message: "Failed to fetch nearby events" });
