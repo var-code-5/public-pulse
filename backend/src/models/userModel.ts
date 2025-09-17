@@ -10,6 +10,7 @@ export interface User {
   name?: string;
   email?: string;
   firebaseUid: string;
+  profileURL?: string;
   role: Role;
   departmentId?: string;
   department?: Department;

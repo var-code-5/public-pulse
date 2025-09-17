@@ -34,6 +34,7 @@ model User {
   name        String?
   email       String?    @unique
   firebaseUid String     @unique
+  profileURL  String?
   role        Role       @default(CITIZEN)
 
   departmentId String?
