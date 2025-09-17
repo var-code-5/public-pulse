@@ -14,7 +14,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized: Authentication required' });
     }
     
-    const { name, email } = req.body;
+    const { name, email, profileURL } = req.body;
     const firebaseUid = req.user.uid;
     
     // Check if user already exists with this Firebase UID
@@ -40,6 +40,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
         name,
         email,
         firebaseUid,
+        profileURL,
         role: Role.CITIZEN
       },
     });

@@ -285,6 +285,7 @@ export const getIssueById = async (
           select: {
             id: true,
             name: true,
+            profileURL: true,
             role: true,
           },
         },

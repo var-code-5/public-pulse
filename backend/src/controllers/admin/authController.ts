@@ -15,7 +15,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized: Authentication required' });
     }
     
-    const { name, email, adminSecret } = req.body;
+    const { name, email, adminSecret, profileURL } = req.body;
     const firebaseUid = req.user.uid;
     
     // Check if admin secret is valid
@@ -48,6 +48,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
         name,
         email,
         firebaseUid,
+        profileURL,
         role: Role.ADMIN,
       },
     });
