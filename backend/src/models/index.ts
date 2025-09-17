@@ -5,3 +5,4 @@ export * from './commentModel';
 export * from './voteModel';
 export * from './imageModel';
 export * from './notificationModel';
+export * from './eventModel';

@@ -45,6 +45,7 @@ model User {
   votes       Vote[]
   statusChanges IssueStatusHistory[]
   notifications Notification[]
+  events      Event[]
 
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -156,4 +157,20 @@ model Notification {
   issue     Issue?   @relation(fields: [issueId], references: [id])
 
   createdAt DateTime @default(now())
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  location    String?
+  latitude    Float?
+  longitude   Float?
+  eventDate   DateTime
+  
+  creatorId   String
+  creator     User     @relation(fields: [creatorId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

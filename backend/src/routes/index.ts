@@ -9,6 +9,7 @@ import notificationRoutes from './notificationRoutes';
 import departmentRoutes from './departmentRoutes';
 import userRoutes from './userRoutes';
 import imageRoutes from './imageRoutes';
+import eventRoutes from './eventRoutes';
 
 const router = Router();
 
@@ -25,5 +26,6 @@ router.use('/notifications', notificationRoutes);
 router.use('/departments', departmentRoutes);
 router.use('/users', userRoutes);
 router.use('/images', imageRoutes);
+router.use('/events', eventRoutes);
 
 export default router;
